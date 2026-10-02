@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions for the Thoughtflow widget and settings windows. The API key and database never cross into the webview; everything else goes through app commands.",
+  "windows": ["widget", "settings"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "dialog:allow-save",
+    "dialog:allow-ask",
+    "opener:default",
+    "opener:allow-reveal-item-in-dir",
+    "clipboard-manager:allow-write-text"
+  ]
+}

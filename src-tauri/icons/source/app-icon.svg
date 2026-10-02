@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- macOS icon grid: 824px body with 100px margins -->
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="#171716"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="183.5" fill="none" stroke="#2C2B29" stroke-width="1"/>
+  <!-- A line of thought that loops once, then keeps flowing. -->
+  <path d="M 246 640 C 396 640, 468 604, 520 524 C 572 444, 566 352, 500 352 C 436 352, 424 448, 478 522 C 532 596, 640 640, 778 640"
+        fill="none" stroke="#EDEAE3" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="660" cy="368" r="22" fill="#EDEAE3"/>
+</svg>
