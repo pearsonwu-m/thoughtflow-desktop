@@ -9,11 +9,20 @@ import {
   revealInFinder,
   toAppError,
 } from "../lib/api";
-import { ANTHROPIC_CONSOLE_URL, REPOSITORY_URL } from "../lib/constants";
+import { ANTHROPIC_CONSOLE_URL, CLAUDE_CODE_URL, REPOSITORY_URL } from "../lib/constants";
 import { formatBytes, isoDate, modelLabel } from "../lib/format";
 import { DEFAULT_MODEL, MODEL_OPTIONS, supportsEffort, supportsTemperature } from "../lib/models";
 import { DEFAULT_SHORTCUTS, findConflicts, resolveShortcuts, SHORTCUT_LABELS, SHORTCUT_ORDER } from "../lib/shortcuts";
-import type { AppInfo, ConnectionTest, Effort, Settings, ShortcutAction, StorageInfo } from "../types";
+import type {
+  AppInfo,
+  ClaudeCodeStatus,
+  Connection,
+  ConnectionTest,
+  Effort,
+  Settings,
+  ShortcutAction,
+  StorageInfo,
+} from "../types";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 
 type Section = "general" | "claude" | "memory" | "keyboard" | "about";
@@ -319,9 +328,39 @@ function ClaudeSection({
   const effortOk = supportsEffort(c.model);
   const option = MODEL_OPTIONS.find((m) => m.id === c.model);
 
+  const viaCli = c.connection === "claudeCode";
+
   return (
     <section>
       <h1>Claude</h1>
+      <Row
+        label="Connect with"
+        hint={
+          viaCli
+            ? "Uses the Claude Code CLI on this Mac and its sign-in, such as your Claude subscription. No API key needed."
+            : "Uses the Anthropic API with your own key."
+        }
+      >
+        <Segmented<Connection>
+          label="Connect with"
+          value={c.connection}
+          options={[
+            { value: "api", label: "API key" },
+            { value: "claudeCode", label: "Claude Code" },
+          ]}
+          onChange={(v) =>
+            void update((s) => {
+              s.claude.connection = v;
+              return s;
+            })
+          }
+        />
+      </Row>
+
+      {viaCli ? (
+        <ClaudeCodePanel settings={settings} update={update} />
+      ) : (
+      <>
       <div className={`connection connection-${apiKey?.configured ? (test.state === "error" ? "bad" : "ok") : "none"}`}>
         <span className="connection-dot" aria-hidden="true" />
         <span>
@@ -376,6 +415,8 @@ function ClaudeSection({
         </form>
         {keyError && <p className="error-text">{keyError}</p>}
       </Row>
+      </>
+      )}
 
       <Row label="Model" hint={option?.note ?? "A custom model id."}>
         <div className="model-pick">
@@ -433,6 +474,8 @@ function ClaudeSection({
         />
       </Row>
 
+      {!viaCli && (
+      <>
       <Row
         label="Temperature"
         hint={temperatureOk ? "Lower is more focused; higher is more varied." : "Newer Claude models manage this themselves; the setting is ignored."}
@@ -488,6 +531,8 @@ function ClaudeSection({
           ))}
         </select>
       </Row>
+      </>
+      )}
 
       <details className="disclosure">
         <summary>What is sent to Anthropic</summary>
@@ -496,10 +541,106 @@ function ClaudeSection({
           <li>The current thought's conversation, the mode you chose, and today's date.</li>
           <li>Related notes only if you leave them selected under the composer.</li>
           <li>Never your other thoughts, files, clipboard, screen, or which apps you use.</li>
-          <li>Test connection only lists available models; no thought content is sent.</li>
+          {viaCli ? (
+            <>
+              <li>
+                Through Claude Code, Thoughtflow runs <code>claude -p</code> in an empty folder with its tools, MCP servers,
+                plugins, hooks, and CLAUDE.md turned off, and without saving a session to your Claude Code history.
+              </li>
+              <li>Checking the connection only reads Claude Code's version and sign-in; nothing is sent.</li>
+            </>
+          ) : (
+            <li>Test connection only lists available models; no thought content is sent.</li>
+          )}
         </ul>
       </details>
     </section>
+  );
+}
+
+function ClaudeCodePanel({ settings, update }: { settings: Settings; update: Update }) {
+  const [status, setStatus] = useState<ClaudeCodeStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [path, setPath] = useState(settings.claude.cliPath ?? "");
+
+  const check = useCallback(async (cliPath: string | null) => {
+    setChecking(true);
+    try {
+      setStatus(await api.claudeCodeStatus(cliPath));
+    } catch (e) {
+      setStatus({
+        found: false,
+        path: null,
+        version: null,
+        loggedIn: false,
+        authMethod: null,
+        account: null,
+        problem: toAppError(e).message,
+      });
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void check(settings.claude.cliPath);
+  }, [check, settings.claude.cliPath]);
+
+  const savePath = () =>
+    void update((s) => {
+      s.claude.cliPath = path.trim() || null;
+      return s;
+    });
+
+  const ok = Boolean(status?.found && status.loggedIn);
+  const version = `Claude Code ${(status?.version ?? "").replace(/\s*\(Claude Code\)\s*$/, "")}`.trim();
+  const signIn = status?.authMethod === "claude.ai" ? "your Claude subscription" : status?.authMethod ?? "its sign-in";
+
+  return (
+    <>
+      <div className={`connection connection-${status === null ? "none" : ok ? "ok" : "bad"}`}>
+        <span className="connection-dot" aria-hidden="true" />
+        <span>
+          {checking && !status && "Looking for Claude Code…"}
+          {status && ok && `${version} · signed in with ${signIn}${status.account ? ` (${status.account})` : ""}.`}
+          {status && !ok && status.problem}
+        </span>
+        <button className="btn" onClick={() => void check(settings.claude.cliPath)} disabled={checking}>
+          {checking ? "Checking…" : "Check again"}
+        </button>
+      </div>
+      <Row
+        label="Claude Code location"
+        hint={
+          <>
+            Leave empty to find <code>claude</code> automatically
+            {status?.path && !settings.claude.cliPath ? ` (found at ${status.path})` : ""}. Not installed?{" "}
+            <button className="link" onClick={() => void openExternal(CLAUDE_CODE_URL)}>
+              Get Claude Code
+            </button>
+          </>
+        }
+      >
+        <form
+          className="key-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            savePath();
+          }}
+        >
+          <input
+            value={path}
+            spellCheck={false}
+            placeholder="Automatic"
+            aria-label="Path to the claude executable"
+            onChange={(e) => setPath(e.target.value)}
+          />
+          <button className="btn" type="submit" disabled={path.trim() === (settings.claude.cliPath ?? "")}>
+            Save
+          </button>
+        </form>
+      </Row>
+    </>
   );
 }
 

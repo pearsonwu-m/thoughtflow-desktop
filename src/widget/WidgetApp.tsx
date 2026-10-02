@@ -159,6 +159,7 @@ export function WidgetApp() {
           reply: "",
           phase: "sending",
           model: null,
+          via: null,
           retryReason: null,
           regenerate: false,
         },
@@ -202,6 +203,7 @@ export function WidgetApp() {
         reply: "",
         phase: "sending",
         model: null,
+        via: null,
         retryReason: null,
         regenerate: true,
       },
@@ -454,7 +456,8 @@ export function WidgetApp() {
   // --- Render ---------------------------------------------------------------------
 
   const conversation = hasConversation(state);
-  const missingKey = info !== null && !info.apiKey.configured;
+  const usesApiKey = (settings?.claude.connection ?? "api") === "api";
+  const missingKey = usesApiKey && info !== null && !info.apiKey.configured;
   const banner = bannerFor(state.error, missingKey, info);
 
   return (
@@ -574,7 +577,15 @@ interface Banner {
 
 function bannerFor(error: AppError | null, missingKey: boolean, info: AppInfo | null): Banner | null {
   if (error) {
-    const keyProblem = ["missingApiKey", "invalidApiKey", "modelNotFound", "billing", "permissionDenied"].includes(error.kind);
+    const keyProblem = [
+      "missingApiKey",
+      "invalidApiKey",
+      "modelNotFound",
+      "billing",
+      "permissionDenied",
+      "claudeCodeMissing",
+      "claudeCodeSignedOut",
+    ].includes(error.kind);
     return {
       tone: "error",
       text: error.message,
@@ -588,8 +599,8 @@ function bannerFor(error: AppError | null, missingKey: boolean, info: AppInfo | 
   if (missingKey) {
     return {
       tone: "info",
-      text: "Add your Anthropic API key to think with Claude. You can still save thoughts locally.",
-      action: { label: "Add key", section: "claude" },
+      text: "Add an Anthropic API key, or connect Claude Code, to think with Claude. You can still save thoughts locally.",
+      action: { label: "Set up Claude", section: "claude" },
     };
   }
   return null;

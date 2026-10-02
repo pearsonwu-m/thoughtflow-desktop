@@ -240,6 +240,7 @@ export function ConversationView(props: Props) {
           <p className={`status-line${pending.phase === "writing" ? " status-writing" : ""}`}>
             <span className="pulse" aria-hidden="true" />
             {PHASE_TEXT[pending.phase] || "Writing"}
+            {pending.phase === "sending" && pending.via === "claude-code" ? " via Claude Code" : ""}
             {pending.model && pending.phase !== "writing" ? ` · ${modelLabel(pending.model)}` : ""}
             {pending.phase !== "writing" && "…"}
             <span className="status-hint">

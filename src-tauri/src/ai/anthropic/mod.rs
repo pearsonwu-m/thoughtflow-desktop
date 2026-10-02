@@ -4,7 +4,7 @@
 //! REST API directly. It is the only place in the app that knows about
 //! Anthropic's wire format; the API key never leaves the Rust process.
 
-mod accumulate;
+pub(crate) mod accumulate;
 pub mod caps;
 mod errors;
 pub mod request;
@@ -147,6 +147,7 @@ impl AnthropicClient {
     ) -> Result<ChatResult, AiError> {
         on_event(StreamEvent::Sending {
             model: Self::model_of(req),
+            via: "api".into(),
         });
         let resp = self.send_with_retries(req, None, cancel, on_event).await?;
         let mut stream = resp.bytes_stream();

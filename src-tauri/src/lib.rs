@@ -70,6 +70,7 @@ pub fn run() {
             commands::set_api_key,
             commands::delete_api_key,
             commands::test_connection,
+            commands::claude_code_status,
             commands::show_widget,
             commands::hide_widget,
             commands::resize_widget,

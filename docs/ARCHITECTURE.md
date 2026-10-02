@@ -28,7 +28,7 @@ Thoughtflow is a Tauri 2 app. A Rust process owns everything sensitive or statef
 | Application state | `src/state/widget.ts` | Pure reducer for the widget: view, mode, draft, pending stream, errors. Unit-tested. |
 | Command API | `src/lib/api.ts` ↔ `src-tauri/src/commands.rs` | The only bridge. Errors arrive as `{ kind, message, retryable }`. |
 | Conversation | `src-tauri/src/conversation.rs` | Turns user input plus memory into a request, streams the reply, and saves the turn. |
-| AI provider | `src-tauri/src/ai` | `ai/mod.rs` defines provider-neutral types (`Mode`, `Turn`, `StreamEvent`, `AiError`). Everything Anthropic-specific is in `ai/anthropic/`. |
+| AI provider | `src-tauri/src/ai` | `ai/mod.rs` defines provider-neutral types (`Mode`, `Turn`, `StreamEvent`, `AiError`). `ai/backend.rs` picks the transport from settings: `ai/anthropic/` (Messages API with an API key) or `ai/claude_code/` (the local `claude` CLI and its sign-in). |
 | Memory | `src-tauri/src/db` | SQLite schema and migrations, FTS5 search, related-note retrieval, export, secure deletion. |
 | Shortcuts | `src-tauri/src/desktop/shortcut.rs`, `src/lib/shortcuts.ts` | Global ⌥Space (Rust) and rebindable in-app shortcuts (TypeScript), using one accelerator format. |
 | Settings | `src-tauri/src/settings.rs`, `src-tauri/src/secrets.rs` | Preferences as JSON (atomic writes, tolerant of corruption). The API key lives only in the Keychain. |
@@ -55,6 +55,10 @@ Current Claude models bind their reasoning (`thinking` blocks) to the exact conv
 - keeps the system prompt identical for every request;
 - stores each turn's provider payload exactly as sent or received, and replays it unchanged;
 - implements **Regenerate** by removing only the final assistant turn, which leaves every earlier turn and its reasoning intact.
+
+### Through Claude Code instead of the API
+
+With **Connect with: Claude Code**, `ai/claude_code` runs `claude -p --output-format stream-json --include-partial-messages` for each request. Its `stream_event` lines wrap raw Messages API stream events, so they feed the same accumulator as the API path, and the final `result` line is authoritative. Claude Code sessions aren't persisted, so each request is stateless: `claude_code/prompt.rs` renders the stored history as a `<conversation>` transcript, then this turn's app instructions, then the user's words. That prompt is written to stdin. Replies are stored as plain text with provider `claude-code`. When a thought later continues over the API, those turns replay as text, and no reasoning blocks from a different conversation shape are ever sent. Save plan and Save tasks use `--json-schema` and read `structured_output`.
 
 ### Structured extraction
 
@@ -83,7 +87,7 @@ Every failure becomes a short sentence for the UI. Examples: *"Claude couldn't b
 
 ## Extension points
 
-- **Another AI provider:** implement a sibling of `ai/anthropic` and switch on a setting in `conversation.rs`. Stored turns carry a `provider` column, and turns from a different provider degrade to their visible text (`turn_from_stored`).
+- **Another AI provider:** implement a sibling of `ai/anthropic` / `ai/claude_code` and add a `Backend` variant in `ai/backend.rs`. Stored turns carry a `provider` column, and turns from a different provider degrade to their visible text (`turn_from_stored`).
 - **Reminders (opt-in, not implemented):** tasks and plans already store due dates and deadlines. A reminder service would run a timer in `lib.rs`, query due items, and post a notification only when a future `general.reminders` setting is on. Thoughtflow is passive by default and never interrupts on its own.
 
 ## Testing

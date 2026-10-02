@@ -28,6 +28,7 @@ const pending = (overrides: Partial<PendingTurn> = {}): PendingTurn => ({
   reply: "",
   phase: "sending",
   model: null,
+  via: null,
   retryReason: null,
   regenerate: false,
   ...overrides,

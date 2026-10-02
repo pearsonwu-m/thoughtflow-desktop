@@ -4,6 +4,7 @@
 //! delegate to `conversation`, `db`, `secrets`, or `desktop`.
 
 use crate::ai::anthropic::AnthropicClient;
+use crate::ai::claude_code::{ClaudeCodeClient, ClaudeCodeStatus};
 use crate::ai::{Mode, ModelInfo, StreamEvent};
 use crate::conversation::{self, SendRequest};
 use crate::db::models::{normalize_tags, Plan, Prompt, RelatedNote, Task, Thought, ThoughtDetail};
@@ -153,6 +154,16 @@ pub async fn test_connection(state: State<'_, AppState>) -> AppResult<Connection
         model_available: models.iter().any(|m| m.id == model),
         models,
     })
+}
+
+/// Whether the local Claude Code CLI is installed and signed in. Sends no prompt.
+#[tauri::command]
+pub async fn claude_code_status(
+    state: State<'_, AppState>,
+    cli_path: Option<String>,
+) -> AppResult<ClaudeCodeStatus> {
+    let path = cli_path.or_else(|| state.settings().claude.cli_path);
+    Ok(ClaudeCodeClient::status(path).await)
 }
 
 // --- Windows ------------------------------------------------------------------

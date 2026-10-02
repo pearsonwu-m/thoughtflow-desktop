@@ -22,13 +22,17 @@ Text goes to the Anthropic API **only** when you do one of these:
 | Save plan / Save tasks | The current thought's conversation as plain text, today's date, and extraction instructions |
 | Test connection | Nothing about your thoughts. It only lists the models your key can use |
 
-While a request is in flight, the widget shows **"Sending to Claude · model"**.
+While a request is in flight, the widget shows **"Sending to Claude · model"** (or **"Sending to Claude via Claude Code"**).
 
 **Related notes** are excerpts from your past thoughts. They're suggested only while you type a new thought (or in Reflect mode), and they're shown as chips under the composer before you send. Deselect any chip to keep that note out of the request. To keep a thought out of suggestions permanently, open it and choose **⋯ → Keep out of Claude's memory**. You can turn suggestions off entirely in **Settings → Memory**.
 
 Thoughtflow **never** sends your other thoughts, files, clipboard, screen contents, window titles, or anything about which apps you use. It does not read background desktop information at all.
 
 Anthropic's handling of API data is described in its [privacy policy](https://www.anthropic.com/legal/privacy) and [commercial terms](https://www.anthropic.com/legal/commercial-terms).
+
+### When connected through Claude Code
+
+Thoughtflow runs your local `claude` CLI, which sends the same content to Anthropic under its own sign-in. Thoughtflow starts it in an empty folder with its tools, MCP servers, plugins, hooks, skills, and CLAUDE.md turned off, and with `--no-session-persistence`, so these conversations aren't written to your Claude Code session history. The prompt is passed on stdin rather than as a command-line argument, so it isn't visible to other processes. Checking the connection only reads Claude Code's version and sign-in status.
 
 ## Logs
 

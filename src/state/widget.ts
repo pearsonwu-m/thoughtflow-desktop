@@ -16,6 +16,8 @@ export interface PendingTurn {
   reply: string;
   phase: "sending" | "thinking" | "writing" | "retrying";
   model: string | null;
+  /** `api` or `claude-code`, once the request is on its way. */
+  via: string | null;
   retryReason: string | null;
   /** Regenerating replaces the latest reply instead of adding a turn. */
   regenerate: boolean;
@@ -107,7 +109,7 @@ export function reducer(state: WidgetState, action: Action): WidgetState {
       const e = action.event;
       switch (e.type) {
         case "sending":
-          return { ...state, pending: { ...p, phase: "sending", model: e.model } };
+          return { ...state, pending: { ...p, phase: "sending", model: e.model, via: e.via } };
         case "started":
           return { ...state, pending: { ...p, phase: p.reply ? "writing" : "thinking", model: e.model, retryReason: null } };
         case "thinking":

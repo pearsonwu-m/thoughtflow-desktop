@@ -35,7 +35,15 @@ const id = () => crypto.randomUUID();
 
 let settings: Settings = {
   general: { launchAtLogin: false, globalShortcut: "Alt+Space", widgetPosition: "remember", theme: "system", hideOnBlur: false },
-  claude: { model: "claude-opus-5-5", effort: "low", temperature: null, maxTokens: 16000, useMemory: true },
+  claude: {
+    connection: "api",
+    cliPath: null,
+    model: "claude-opus-5-5",
+    effort: "low",
+    temperature: null,
+    maxTokens: 16000,
+    useMemory: true,
+  },
   keyboard: { shortcuts: {} },
   widget: { x: null, y: null },
 };
@@ -94,7 +102,11 @@ function reply(mode: Mode, kind: string, turn: number): string {
 
 async function sendMock(req: SendRequest, onEvent: (e: StreamEvent) => void, regenerate = false): Promise<ThoughtDetail> {
   if (!req.text.trim() && req.kind === "message" && !regenerate) throw { kind: "invalid", message: "Write a thought first.", retryable: false };
-  onEvent({ type: "sending", model: settings.claude.model });
+  onEvent({
+    type: "sending",
+    model: settings.claude.model,
+    via: settings.claude.connection === "claudeCode" ? "claude-code" : "api",
+  });
   await delay(350);
   onEvent({ type: "started", model: settings.claude.model });
   onEvent({ type: "thinking" });
@@ -169,6 +181,17 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
       case "set_api_key":
       case "delete_api_key":
         return { configured: command === "set_api_key", source: command === "set_api_key" ? "keychain" : "none", hint: null };
+      case "claude_code_status":
+        await delay(250);
+        return {
+          found: true,
+          path: "~/.local/bin/claude",
+          version: "2.1.287 (Claude Code)",
+          loggedIn: true,
+          authMethod: "claude.ai",
+          account: "you@example.com",
+          problem: null,
+        };
       case "test_connection":
         await delay(300);
         return { latencyMs: 286, modelAvailable: true, models: [{ id: "claude-opus-5-5", displayName: "Claude Opus 5.5" }] };

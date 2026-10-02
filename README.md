@@ -22,6 +22,7 @@ Thoughtflow is a thinking layer over your desktop, not a chat app. There's no Do
 - **Local memory.** Every thought is saved in SQLite on your Mac with full-text search. When you start a new thought, related past notes are suggested as context. You see each one and can deselect it before anything is sent.
 - **Archive.** A notebook-style history (Today / Yesterday / …) with search, plus saved plans (steps, status, deadline) and lightweight tasks (complete, edit, delete).
 - **Keyboard-first.** Everything works without a mouse, and every in-app shortcut can be rebound.
+- **API key or Claude Code.** Connect with an Anthropic API key, or with the Claude Code CLI already installed on your Mac (for example, signed in with your Claude subscription), so no API key is needed.
 - **Private by default.** The API key lives in the macOS Keychain and never reaches the UI layer. Nothing leaves your Mac until you ask Claude for something. Export and delete-everything are built in.
 
 ## Requirements
@@ -30,7 +31,7 @@ Thoughtflow is a thinking layer over your desktop, not a chat app. There's no Do
 - [Node.js](https://nodejs.org) 20+ and npm
 - [Rust](https://rustup.rs) stable 1.85+ (`rustup default stable`)
 - Xcode Command Line Tools (`xcode-select --install`)
-- An [Anthropic API key](https://console.anthropic.com/settings/keys)
+- An [Anthropic API key](https://console.anthropic.com/settings/keys), **or** [Claude Code](https://claude.com/product/claude-code) installed and signed in
 
 ## Quick start
 
@@ -43,7 +44,7 @@ npm run dev
 
 The first `npm run dev` compiles the Rust backend, which takes a few minutes. Thoughtflow then appears with its widget open and an icon in the menu bar.
 
-1. Press **⌘,** (or use the menu-bar icon → Settings…), open **Claude**, paste your API key, and press **Save**. The key is verified with **Test connection**.
+1. Press **⌘,** (or use the menu-bar icon → Settings…) and open **Claude**. Either paste your API key and press **Save**, or choose **Connect with: Claude Code** to use the `claude` CLI you're already signed in to.
 2. Press **⌥Space** anywhere, type a thought, and press **⌘↵**.
 
 ## Commands
@@ -66,10 +67,24 @@ The first `npm run dev` compiles the Rust backend, which takes a few minutes. Th
 
 ## How Claude authentication works
 
+Settings → Claude → **Connect with** offers two options.
+
+### API key
+
 - In **Settings → Claude**, the key is handed straight to the Rust backend, which stores it in the **macOS Keychain** (service `com.thoughtflow.desktop`). The UI can only ask whether a key exists; it can never read it back.
 - Every Claude request is made by the Rust backend (`src-tauri/src/ai/anthropic`). The webview never sees the key or talks to the network.
 - For development, you can instead put `ANTHROPIC_API_KEY=…` in a `.env` file (copy `.env.example`). It's used only when no Keychain key exists.
 - **Test connection** lists your available models. It costs nothing and sends no thought content.
+
+### Claude Code (no API key)
+
+Thoughtflow can send requests through the [Claude Code](https://claude.com/product/claude-code) CLI on your Mac, using whatever it's signed in with (for example, a Claude Pro or Max subscription).
+
+- Thoughtflow finds `claude` automatically (`~/.local/bin`, Homebrew, or your login shell's PATH), or you can set its location in Settings.
+- Each request runs `claude -p` in an empty folder inside Thoughtflow's data directory, with Claude Code's tools, MCP servers, plugins, hooks, skills, and CLAUDE.md turned off (`--tools "" --safe-mode --strict-mcp-config --disable-slash-commands`). Sessions aren't saved to your Claude Code history (`--no-session-persistence`).
+- The prompt is passed on stdin, so thought text never appears in the process list. Any `ANTHROPIC_API_KEY` in Thoughtflow's environment is removed, so Claude Code always uses its own sign-in.
+- **Check again** reads `claude --version` and `claude auth status`; it sends nothing to Claude.
+- Requests through Claude Code count toward that account's usage limits. Model and Response depth apply; temperature and Longest reply are API-only.
 
 ### Model and behavior
 

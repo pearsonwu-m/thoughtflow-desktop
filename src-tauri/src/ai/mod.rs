@@ -6,6 +6,8 @@
 //! carried opaquely in [`Turn::payload`].
 
 pub mod anthropic;
+pub mod backend;
+pub mod claude_code;
 pub mod prompts;
 
 use serde::{Deserialize, Serialize};
@@ -128,7 +130,8 @@ pub struct ChatOptions {
 )]
 pub enum StreamEvent {
     /// Text is being sent to the provider (shown as a privacy indicator).
-    Sending { model: String },
+    /// `via` is `api` or `claude-code`.
+    Sending { model: String, via: String },
     /// The provider accepted the request; `model` is the model actually serving it.
     Started { model: String },
     /// The model is reasoning before it writes visible text.
@@ -202,6 +205,12 @@ pub enum AiError {
     Malformed(String),
     #[error("Stopped.")]
     Cancelled,
+    #[error("Claude Code wasn't found on this Mac. Install it, or set its location in Settings → Claude.")]
+    ClaudeCodeMissing,
+    #[error("Claude Code isn't signed in. Run `claude` in Terminal to sign in, then try again.")]
+    ClaudeCodeSignedOut,
+    #[error("Claude Code couldn't answer: {0}")]
+    ClaudeCode(String),
 }
 
 fn rate_limit_message(retry_after_secs: Option<u64>) -> String {
@@ -230,6 +239,9 @@ impl AiError {
             AiError::Refusal => "refusal",
             AiError::Malformed(_) => "malformed",
             AiError::Cancelled => "cancelled",
+            AiError::ClaudeCodeMissing => "claudeCodeMissing",
+            AiError::ClaudeCodeSignedOut => "claudeCodeSignedOut",
+            AiError::ClaudeCode(_) => "claudeCode",
         }
     }
 

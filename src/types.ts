@@ -116,6 +116,8 @@ export interface RelatedNote {
 }
 
 export type Effort = "low" | "medium" | "high";
+/** How requests reach Claude: an API key, or the local Claude Code CLI's sign-in. */
+export type Connection = "api" | "claudeCode";
 export type WidgetPosition = "remember" | "center" | "top";
 export type Theme = "system" | "light" | "dark";
 
@@ -128,6 +130,9 @@ export interface Settings {
     hideOnBlur: boolean;
   };
   claude: {
+    connection: Connection;
+    /** Path to the `claude` executable; found automatically when null. */
+    cliPath: string | null;
     model: string;
     effort: Effort;
     temperature: number | null;
@@ -179,6 +184,18 @@ export interface AppInfo {
   startupWarning: string | null;
 }
 
+/** Whether the local Claude Code CLI is installed and signed in. */
+export interface ClaudeCodeStatus {
+  found: boolean;
+  path: string | null;
+  version: string | null;
+  loggedIn: boolean;
+  /** e.g. "claude.ai" for a Claude subscription. */
+  authMethod: string | null;
+  account: string | null;
+  problem: string | null;
+}
+
 export interface ModelInfo {
   id: string;
   displayName: string;
@@ -213,7 +230,7 @@ export interface SendRequest {
 
 /** Progress events streamed while Claude replies. */
 export type StreamEvent =
-  | { type: "sending"; model: string }
+  | { type: "sending"; model: string; via: "api" | "claude-code" }
   | { type: "started"; model: string }
   | { type: "thinking" }
   | { type: "retrying"; attempt: number; delayMs: number; reason: string }

@@ -54,9 +54,23 @@ impl Default for GeneralSettings {
     }
 }
 
+/// How requests reach Claude.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Connection {
+    /// The Messages API, with a key stored in the Keychain.
+    #[default]
+    Api,
+    /// The local Claude Code CLI, with its own sign-in (e.g. a Claude subscription).
+    ClaudeCode,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ClaudeSettings {
+    pub connection: Connection,
+    /// Path to the `claude` executable; found automatically when unset.
+    pub cli_path: Option<String>,
     pub model: String,
     pub effort: Effort,
     /// Only sent to models that accept sampling parameters.
@@ -69,6 +83,8 @@ pub struct ClaudeSettings {
 impl Default for ClaudeSettings {
     fn default() -> Self {
         Self {
+            connection: Connection::Api,
+            cli_path: None,
             model: DEFAULT_MODEL.to_string(),
             effort: Effort::Low,
             temperature: None,
@@ -130,6 +146,12 @@ impl Settings {
             self.claude.model = DEFAULT_MODEL.to_string();
         }
         self.claude.model = self.claude.model.trim().to_string();
+        self.claude.cli_path = self
+            .claude
+            .cli_path
+            .take()
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty());
         self.claude.max_tokens = self.claude.max_tokens.clamp(1_024, 64_000);
         self.claude.temperature = self.claude.temperature.map(|t| t.clamp(0.0, 1.0));
         if self.general.global_shortcut.trim().is_empty() {
@@ -147,6 +169,12 @@ mod tests {
     fn defaults_fill_missing_fields() {
         let s: Settings = serde_json::from_str(r#"{"claude": {"effort": "high"}}"#).unwrap();
         assert_eq!(s.claude.effort, Effort::High);
+        assert_eq!(s.claude.connection, Connection::Api);
+        let cli: Settings =
+            serde_json::from_str(r#"{"claude": {"connection": "claudeCode", "cliPath": "  "}}"#)
+                .unwrap();
+        assert_eq!(cli.claude.connection, Connection::ClaudeCode);
+        assert_eq!(cli.sanitized().claude.cli_path, None);
         assert_eq!(s.claude.model, DEFAULT_MODEL);
         assert_eq!(s.general.global_shortcut, "Alt+Space");
         assert!(s.claude.use_memory);

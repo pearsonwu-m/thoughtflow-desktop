@@ -11,6 +11,7 @@ import type {
   ApiKeyStatus,
   AppError,
   AppInfo,
+  ClaudeCodeStatus,
   ConnectionTest,
   Mode,
   NewTask,
@@ -70,6 +71,8 @@ export const api = {
   setApiKey: (key: string) => call<ApiKeyStatus>("set_api_key", { key }),
   deleteApiKey: () => call<ApiKeyStatus>("delete_api_key"),
   testConnection: () => call<ConnectionTest>("test_connection"),
+  claudeCodeStatus: (cliPath?: string | null) =>
+    call<ClaudeCodeStatus>("claude_code_status", { cliPath: cliPath ?? null }),
 
   // Windows
   showWidget: (view?: string) => call<null>("show_widget", { view: view ?? null }),

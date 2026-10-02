@@ -5,8 +5,9 @@
 //! cancelled or failed request leaves no half-written state behind, and stored
 //! turns are replayed to the API exactly as they were first sent.
 
-use crate::ai::anthropic::caps::ModelCaps;
-use crate::ai::anthropic::{self, request, AnthropicClient};
+use crate::ai::anthropic::AnthropicClient;
+use crate::ai::backend::Backend;
+use crate::ai::claude_code::ClaudeCodeClient;
 use crate::ai::prompts::{self, NoteContext};
 use crate::ai::{AiError, ChatOptions, ChatResult, Effort, Mode, StreamEvent, Turn, TurnRole};
 use crate::db::models::{
@@ -14,14 +15,14 @@ use crate::db::models::{
 };
 use crate::db::{plans, search, thoughts};
 use crate::error::{AppError, AppResult};
-use crate::settings::Settings;
+use crate::settings::{Connection, Settings};
 use crate::state::{lock, AppState};
 use crate::util::{derive_title, extract_prompt_block, new_id, now_ms, summarize_reply};
-use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
+/// Payload format of stored user and app turns (Anthropic-style content blocks).
 const PROVIDER: &str = "anthropic";
 const SUMMARY_CHARS: usize = 320;
 
@@ -66,9 +67,20 @@ pub struct SendRequest {
     pub local_date: String,
 }
 
-fn client(state: &AppState) -> AppResult<AnthropicClient> {
-    let (key, _) = state.keys.get().ok_or(AppError::MissingApiKey)?;
-    Ok(AnthropicClient::new(state.http.clone(), key))
+/// Where requests go: the API (needs a key) or the local Claude Code CLI.
+async fn backend(state: &AppState, settings: &Settings) -> AppResult<Backend> {
+    match settings.claude.connection {
+        Connection::Api => {
+            let (key, _) = state.keys.get().ok_or(AppError::MissingApiKey)?;
+            Ok(Backend::Api(AnthropicClient::new(state.http.clone(), key)))
+        }
+        Connection::ClaudeCode => {
+            let workdir = state.data_dir.join("claude-code");
+            Ok(Backend::ClaudeCode(
+                ClaudeCodeClient::locate(settings.claude.cli_path.clone(), workdir).await?,
+            ))
+        }
+    }
 }
 
 fn chat_options(settings: &Settings) -> ChatOptions {
@@ -128,10 +140,11 @@ fn stored(
 
 /// Stores the reply and, in Prompt mode, the generated prompt it contains.
 fn insert_reply(
-    conn: &Connection,
+    conn: &rusqlite::Connection,
     thought_id: &str,
     seq: i64,
     mode: Mode,
+    provider: &str,
     result: &ChatResult,
     now: i64,
 ) -> rusqlite::Result<()> {
@@ -145,6 +158,7 @@ fn insert_reply(
         result.content.clone(),
     );
     reply.message.created_at = now;
+    reply.provider = provider.to_string();
     reply.message.model = Some(result.model.clone());
     reply.message.truncated = result.truncated();
     thoughts::insert_message(conn, &reply)?;
@@ -171,20 +185,20 @@ fn insert_reply(
     )
 }
 
+/// Streams a reply; returns it with the provider name to store alongside it.
 async fn stream(
     state: &AppState,
     request_id: &str,
     turns: &[Turn],
     emit: &(dyn Fn(StreamEvent) + Send + Sync),
-) -> AppResult<ChatResult> {
-    let client = client(state)?;
-    let opts = chat_options(&state.settings());
-    let caps = ModelCaps::for_model(&opts.model);
-    let built = request::chat_request(&opts, &caps, prompts::SYSTEM_PROMPT, turns);
+) -> AppResult<(ChatResult, &'static str)> {
+    let settings = state.settings();
+    let backend = backend(state, &settings).await?;
+    let opts = chat_options(&settings);
     let token = state.begin_request(request_id);
-    let result = client.stream_message(&built, &token, emit).await;
+    let result = backend.chat(&opts, turns, &token, emit).await;
     state.end_request(request_id);
-    Ok(result?)
+    Ok((result?, backend.provider()))
 }
 
 /// Sends a user turn (creating the thought on its first reply) and returns
@@ -204,7 +218,7 @@ pub async fn send(
         return Err(AppError::Invalid("Write a thought first.".into()));
     }
     // Fail fast, before touching storage, when there's no key.
-    if state.keys.get().is_none() {
+    if settings.claude.connection == Connection::Api && state.keys.get().is_none() {
         return Err(AppError::MissingApiKey);
     }
 
@@ -244,7 +258,7 @@ pub async fn send(
         });
     }
 
-    let result = stream(state, &req.request_id, &turns, emit).await?;
+    let (result, provider) = stream(state, &req.request_id, &turns, emit).await?;
 
     let now = now_ms();
     let mut conn = lock(&state.db);
@@ -297,7 +311,7 @@ pub async fn send(
         thoughts::insert_message(&tx, &switch)?;
         seq += 1;
     }
-    insert_reply(&tx, &thought_id, seq, req.mode, &result, now)?;
+    insert_reply(&tx, &thought_id, seq, req.mode, provider, &result, now)?;
     tx.commit()?;
     thoughts::detail(&conn, &thought_id)?.ok_or_else(not_found)
 }
@@ -324,7 +338,7 @@ pub async fn regenerate(
         ));
     };
     let turns: Vec<Turn> = prior.iter().map(turn_from_stored).collect();
-    let result = stream(state, request_id, &turns, emit).await?;
+    let (result, provider) = stream(state, request_id, &turns, emit).await?;
 
     let now = now_ms();
     let mut conn = lock(&state.db);
@@ -339,6 +353,7 @@ pub async fn regenerate(
         thought_id,
         last.message.seq,
         last.message.mode,
+        provider,
         &result,
         now,
     )?;
@@ -410,7 +425,8 @@ async fn extract(
     thought_id: &str,
     build: impl FnOnce(&str) -> (String, Value),
 ) -> AppResult<(Thought, Value)> {
-    let client = client(state)?;
+    let settings = state.settings();
+    let backend = backend(state, &settings).await?;
     let (thought, history) = {
         let conn = lock(&state.db);
         let thought = thoughts::get(&conn, thought_id)?.ok_or_else(not_found)?;
@@ -418,25 +434,22 @@ async fn extract(
         (thought, history)
     };
     let (user_text, schema) = build(&transcript_for(&thought, &history));
-    let settings = state.settings();
     let opts = ChatOptions {
-        model: settings.claude.model,
+        model: settings.claude.model.clone(),
         effort: Effort::Low,
         temperature: None,
         max_tokens: 8_000,
     };
-    let caps = ModelCaps::for_model(&opts.model);
-    let built = request::extraction_request(
-        &opts,
-        &caps,
-        prompts::EXTRACTION_SYSTEM_PROMPT,
-        &user_text,
-        &schema,
-    );
-    let text = client
-        .complete_text(&built, &CancellationToken::new())
+    let value = backend
+        .extract(
+            &opts,
+            prompts::EXTRACTION_SYSTEM_PROMPT,
+            &user_text,
+            &schema,
+            &CancellationToken::new(),
+        )
         .await?;
-    Ok((thought, anthropic::parse_json_object(&text)?))
+    Ok((thought, value))
 }
 
 fn malformed() -> AppError {
@@ -550,6 +563,89 @@ mod tests {
     use crate::db::open_in_memory;
     use crate::db::thoughts::fixtures;
 
+    /// App state wired to a fake `claude` executable that records its stdin
+    /// and replies with `reply`.
+    fn claude_code_state(dir: &std::path::Path, reply: &str) -> AppState {
+        use std::os::unix::fs::PermissionsExt;
+        let program = dir.join("claude");
+        let result = json!({"type": "result", "subtype": "success", "is_error": false, "result": reply, "stop_reason": "end_turn"});
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\ncat > \"{}/stdin.txt\"\ncat <<'TF_EOF'\n{{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"claude-opus-5-5\"}}\n{result}\nTF_EOF\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut settings = Settings::default();
+        settings.claude.connection = Connection::ClaudeCode;
+        settings.claude.cli_path = Some(program.display().to_string());
+        AppState {
+            db: std::sync::Mutex::new(open_in_memory()),
+            db_path: dir.join("thoughtflow.db"),
+            data_dir: dir.to_path_buf(),
+            settings: std::sync::Mutex::new(settings),
+            settings_path: dir.join("settings.json"),
+            keys: Default::default(),
+            http: reqwest::Client::new(),
+            inflight: Default::default(),
+            shortcut: Default::default(),
+            pending_settings_section: Default::default(),
+            startup_warning: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn claude_code_conversations_are_saved_as_plain_text() {
+        let dir = std::env::temp_dir().join(format!("tf-conv-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = claude_code_state(&dir, "What I'm hearing: two deadlines.");
+        let request = |thought_id: Option<String>, text: &str| SendRequest {
+            request_id: new_id(),
+            thought_id,
+            text: text.into(),
+            mode: Mode::Think,
+            kind: SendKind::Message,
+            context_ids: vec![],
+            local_date: "Friday, October 2, 2026".into(),
+        };
+
+        let detail = send(
+            &state,
+            request(None, "finish physics and email Dr. Lignos"),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+        let roles: Vec<&str> = detail.messages.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, ["user", "system", "assistant"]);
+        assert_eq!(detail.messages[2].text, "What I'm hearing: two deadlines.");
+        let stored = thoughts::load_messages(&lock(&state.db), &detail.thought.id).unwrap();
+        assert_eq!(stored[2].provider, "claude-code");
+        assert_eq!(
+            stored[2].payload,
+            json!([{"type": "text", "text": "What I'm hearing: two deadlines."}])
+        );
+        let first_prompt = std::fs::read_to_string(dir.join("stdin.txt")).unwrap();
+        assert!(first_prompt.contains("Today is Friday, October 2, 2026."));
+        assert!(first_prompt.ends_with("finish physics and email Dr. Lignos"));
+
+        // The follow-up carries the earlier exchange as a transcript.
+        send(
+            &state,
+            request(Some(detail.thought.id.clone()), "Physics is due Monday"),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+        let second_prompt = std::fs::read_to_string(dir.join("stdin.txt")).unwrap();
+        assert!(second_prompt
+            .contains("<thoughtflow>\nWhat I'm hearing: two deadlines.\n</thoughtflow>"));
+        assert!(second_prompt.ends_with("Physics is due Monday"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
     #[test]
     fn foreign_turns_degrade_to_visible_text() {
         let conn = open_in_memory();
@@ -594,7 +690,7 @@ mod tests {
             text: "<prompt>You are a tutor.</prompt>".into(),
             stop_reason: "end_turn".into(),
         };
-        insert_reply(&conn, &t.id, 0, Mode::Prompt, &result, 5).unwrap();
+        insert_reply(&conn, &t.id, 0, Mode::Prompt, "claude-code", &result, 5).unwrap();
         let prompts = thoughts::prompts_for(&conn, &t.id).unwrap();
         assert_eq!(prompts.len(), 1);
         assert_eq!(prompts[0].content, "You are a tutor.");
