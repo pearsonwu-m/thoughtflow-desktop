@@ -10,8 +10,6 @@ import { Composer } from "./Composer";
 import { ConversationView } from "./ConversationView";
 import { Header } from "./Header";
 
-/** Transparent margin around the card (room for its shadow); see .shell in widget.css. */
-const SHELL_PADDING = 32;
 const ARCHIVE_HEIGHT = 540;
 
 const MODE_FOR_ACTION: Partial<Record<ShortcutAction, Mode>> = {
@@ -99,7 +97,7 @@ export function WidgetApp() {
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const height = card.offsetHeight + SHELL_PADDING;
+        const height = card.offsetHeight;
         if (height !== last) {
           last = height;
           api.resizeWidget(height).catch(() => {});

@@ -12,8 +12,11 @@ use tauri::{
 
 pub const WIDGET: &str = "widget";
 pub const SETTINGS: &str = "settings";
-/// Logical width of the widget window (the card plus its shadow margin).
+/// Logical width of the widget window, which is exactly the card.
 pub const WIDGET_WIDTH: f64 = 600.0;
+/// Corner radius of the widget; matches `--radius` in `src/styles/tokens.css`.
+#[cfg(target_os = "macos")]
+const CORNER_RADIUS: f64 = 12.0;
 const MIN_HEIGHT: f64 = 140.0;
 /// Matches the CSS exit animation in `src/styles/widget.css`.
 const HIDE_ANIMATION: Duration = Duration::from_millis(110);
@@ -32,12 +35,16 @@ pub fn widget(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(WIDGET)
 }
 
-/// Lets the widget appear over whatever is on screen, including full-screen
-/// apps: each time it is shown it moves to the active Space. It is also kept
-/// out of the ⌘` window cycle. (Tauri's "visible on all workspaces" does not
-/// cover full-screen Spaces.)
+/// Native look for the widget:
+/// - appears over whatever is on screen, including full-screen apps (each time
+///   it is shown it moves to the active Space; Tauri's "visible on all
+///   workspaces" does not cover full-screen Spaces), and stays out of ⌘`;
+/// - rounded corners clipped by AppKit, so the system window shadow follows
+///   the card's shape instead of a painted, translucent CSS halo.
 #[cfg(target_os = "macos")]
 pub fn configure_widget(window: &WebviewWindow) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
     use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
     let Ok(ptr) = window.ns_window() else { return };
     // SAFETY: Tauri returns the live NSWindow backing this webview window, and
@@ -48,10 +55,50 @@ pub fn configure_widget(window: &WebviewWindow) {
             | NSWindowCollectionBehavior::FullScreenAuxiliary
             | NSWindowCollectionBehavior::IgnoresCycle,
     );
+    ns_window.setHasShadow(true);
+    // SAFETY: standard NSView/CALayer messages on the window's content view,
+    // sent on the main thread.
+    unsafe {
+        let view: *mut AnyObject = msg_send![ns_window, contentView];
+        if let Some(view) = view.as_ref() {
+            let _: () = msg_send![view, setWantsLayer: true];
+            let layer: *mut AnyObject = msg_send![view, layer];
+            if let Some(layer) = layer.as_ref() {
+                let _: () = msg_send![layer, setCornerRadius: CORNER_RADIUS];
+                let _: () = msg_send![layer, setMasksToBounds: true];
+            }
+        }
+    }
+    ns_window.invalidateShadow();
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn configure_widget(_window: &WebviewWindow) {}
+
+/// Recomputes the system shadow after the widget changes size. macOS derives
+/// it from the window's pixels, so it is refreshed again once the web content
+/// has repainted at the new size.
+#[cfg(target_os = "macos")]
+fn refresh_shadow(window: &WebviewWindow) {
+    fn invalidate(window: &WebviewWindow) {
+        use objc2_app_kit::NSWindow;
+        if let Ok(ptr) = window.ns_window() {
+            // SAFETY: the live NSWindow for this window, used on the main thread.
+            unsafe { &*(ptr as *const NSWindow) }.invalidateShadow();
+        }
+    }
+    let now = window.clone();
+    let _ = window.run_on_main_thread(move || invalidate(&now));
+    let later = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        let target = later.clone();
+        let _ = later.run_on_main_thread(move || invalidate(&target));
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn refresh_shadow(_window: &WebviewWindow) {}
 
 /// Unhides the app, orders the widget in, and activates the app, in that
 /// order, on the main thread. (Issued separately, the window can be ordered
@@ -233,7 +280,9 @@ pub fn resize_widget(window: &WebviewWindow, height: f64) -> tauri::Result<()> {
             window.set_position(PhysicalPosition::new(pos.x, y.round() as i32))?;
         }
     }
-    window.set_size(LogicalSize::new(WIDGET_WIDTH, height.round()))
+    window.set_size(LogicalSize::new(WIDGET_WIDTH, height.round()))?;
+    refresh_shadow(window);
+    Ok(())
 }
 
 pub fn open_settings(app: &AppHandle, section: Option<&str>) {

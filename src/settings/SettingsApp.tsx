@@ -346,7 +346,7 @@ function ClaudeSection({
           value={c.connection}
           options={[
             { value: "api", label: "API key" },
-            { value: "claudeCode", label: "Claude Code" },
+            { value: "claudeCode", label: "Claude Code CLI" },
           ]}
           onChange={(v) =>
             void update((s) => {

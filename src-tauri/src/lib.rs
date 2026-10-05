@@ -137,6 +137,24 @@ fn handle_cli(app: &tauri::AppHandle, args: &[String]) {
     }
 }
 
+/// First-run default: without an API key, use Claude Code when it's installed,
+/// so Thoughtflow works out of the box with a Claude subscription. The choice
+/// is saved either way and never revisited automatically.
+fn choose_default_connection(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+    let state = app.state::<AppState>();
+    let mut settings = state.settings();
+    if state.keys.get().is_none()
+        && ai::claude_code::find_cli(settings.claude.cli_path.as_deref()).is_some()
+    {
+        settings.claude.connection = settings::Connection::ClaudeCode;
+        eprintln!("[thoughtflow] no API key found; connecting through Claude Code");
+    }
+    if let Ok(saved) = state.save_settings(settings) {
+        let _ = app.emit("tf://settings-changed", saved);
+    }
+}
+
 /// Opens the database, setting a damaged file aside instead of refusing to start.
 fn open_database(
     path: &Path,
@@ -173,6 +191,11 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = data_dir.join("thoughtflow.db");
     let settings_path = data_dir.join("settings.json");
     let settings = Settings::load(&settings_path);
+    // Settings written before the Claude Code option existed have no
+    // connection yet; one is chosen once, below.
+    let connection_chosen = std::fs::read_to_string(&settings_path)
+        .map(|raw| raw.contains("\"connection\""))
+        .unwrap_or(false);
     let (conn, startup_warning) = open_database(&db_path)?;
 
     app.manage(AppState {
@@ -201,6 +224,11 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     });
     tray::create_tray(&handle)?;
     shortcut::register(&handle, &settings.general.global_shortcut);
+    if !connection_chosen {
+        let handle = handle.clone();
+        // Off the main thread: reads the Keychain and may ask the login shell for PATH.
+        std::thread::spawn(move || choose_default_connection(&handle));
+    }
 
     // Keep the login item in sync with the saved preference.
     let autolaunch = handle.autolaunch();

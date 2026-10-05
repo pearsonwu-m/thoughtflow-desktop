@@ -84,6 +84,7 @@ Thoughtflow can send requests through the [Claude Code](https://claude.com/produ
 - Each request runs `claude -p` in an empty folder inside Thoughtflow's data directory, with Claude Code's tools, MCP servers, plugins, hooks, skills, and CLAUDE.md turned off (`--tools "" --safe-mode --strict-mcp-config --disable-slash-commands`). Sessions aren't saved to your Claude Code history (`--no-session-persistence`).
 - The prompt is passed on stdin, so thought text never appears in the process list. Any `ANTHROPIC_API_KEY` in Thoughtflow's environment is removed, so Claude Code always uses its own sign-in.
 - **Check again** reads `claude --version` and `claude auth status`; it sends nothing to Claude.
+- On first launch, if no API key is stored and Claude Code is installed, Thoughtflow picks Claude Code automatically. You can switch at any time.
 - Requests through Claude Code count toward that account's usage limits. Model and Response depth apply; temperature and Longest reply are API-only.
 
 ### Model and behavior
@@ -152,7 +153,7 @@ Read **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for how the pieces fit tog
 
 - **⌥Space does nothing.** Another app may own it. Open the menu-bar icon → Settings… → General and record a different shortcut. The widget and settings show a notice when registration fails.
 - **"Add your Anthropic API key"** means no key is stored yet. Use Settings → Claude.
-- **Keychain prompt during development.** Each rebuild of the dev binary has a new code signature, so macOS may ask once whether Thoughtflow may read its own Keychain item. Choose *Always Allow*.
+- **Keychain prompt after a rebuild or update.** Unsigned builds get a new code signature each time, so macOS asks once whether Thoughtflow may read its own Keychain item. Choose *Always Allow*. The app stays usable while the prompt is open.
 - **"Claude couldn't be reached."** Check your connection; Thoughtflow retries transient failures (rate limits, overloads, network) automatically before reporting them.
 
 ## License

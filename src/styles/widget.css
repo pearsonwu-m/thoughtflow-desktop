@@ -6,9 +6,11 @@ html[data-window="widget"] body {
   overflow: hidden;
 }
 
+/* The window is exactly the size of the card. Its shadow and rounded corners
+   come from macOS (see configure_widget in desktop/window.rs), so nothing
+   translucent is painted around the edges. */
 .shell {
-  /* Room for the card's shadow. Keep in sync with SHELL_PADDING in WidgetApp. */
-  padding: 12px 16px 20px;
+  padding: 0;
 }
 
 .card {
@@ -17,9 +19,8 @@ html[data-window="widget"] body {
   flex-direction: column;
   background: var(--paper);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: inset 0 0 0 1px var(--edge);
   overflow: hidden;
-  transform-origin: 50% 0;
 }
 
 .card.entering {
@@ -30,17 +31,16 @@ html[data-window="widget"] body {
   animation: tf-leave 100ms ease-in forwards;
 }
 
+/* Fades only: moving or scaling the card would expose the window behind it. */
 @keyframes tf-enter {
   from {
     opacity: 0;
-    transform: translateY(-6px) scale(0.985);
   }
 }
 
 @keyframes tf-leave {
   to {
     opacity: 0;
-    transform: translateY(-4px) scale(0.99);
   }
 }
 

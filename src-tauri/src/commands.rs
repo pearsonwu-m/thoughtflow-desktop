@@ -44,16 +44,20 @@ pub struct AppInfo {
     startup_warning: Option<String>,
 }
 
+// Commands that read or write the Keychain are async so they run off the
+// main thread: if macOS asks the user to allow Keychain access, the UI keeps
+// working while the prompt is open.
+
 #[tauri::command]
-pub fn get_app_info(state: State<'_, AppState>) -> AppInfo {
-    AppInfo {
+pub async fn get_app_info(state: State<'_, AppState>) -> AppResult<AppInfo> {
+    Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         data_dir: state.data_dir.display().to_string(),
         db_path: state.db_path.display().to_string(),
         shortcut: lock(&state.shortcut).clone(),
         api_key: state.keys.status(),
         startup_warning: lock(&state.startup_warning).clone(),
-    }
+    })
 }
 
 #[tauri::command]
@@ -107,12 +111,12 @@ pub fn get_shortcut_status(state: State<'_, AppState>) -> ShortcutStatus {
 // --- API key ------------------------------------------------------------------
 
 #[tauri::command]
-pub fn get_api_key_status(state: State<'_, AppState>) -> ApiKeyStatus {
-    state.keys.status()
+pub async fn get_api_key_status(state: State<'_, AppState>) -> AppResult<ApiKeyStatus> {
+    Ok(state.keys.status())
 }
 
 #[tauri::command]
-pub fn set_api_key(
+pub async fn set_api_key(
     app: AppHandle,
     state: State<'_, AppState>,
     key: String,
@@ -124,7 +128,7 @@ pub fn set_api_key(
 }
 
 #[tauri::command]
-pub fn delete_api_key(app: AppHandle, state: State<'_, AppState>) -> AppResult<ApiKeyStatus> {
+pub async fn delete_api_key(app: AppHandle, state: State<'_, AppState>) -> AppResult<ApiKeyStatus> {
     state.keys.delete().map_err(AppError::Keychain)?;
     let status = state.keys.status();
     let _ = app.emit("tf://api-key-changed", status.clone());
@@ -528,7 +532,7 @@ pub fn clear_history(app: AppHandle, state: State<'_, AppState>) -> AppResult<()
 
 /// Deletes thoughts, plans, tasks, settings, and the stored API key.
 #[tauri::command]
-pub fn delete_all_data(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+pub async fn delete_all_data(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     export::clear_all(&lock(&state.db))?;
     state.keys.delete().map_err(AppError::Keychain)?;
     let _ = app.autolaunch().disable();
